@@ -51,11 +51,13 @@ class PromptParser:
             TypeError: If an unsupported prompt template type is provided.
         """
         if isinstance(prompt_template, PromptTemplate):
-            return prompt_template.template, prompt_template.input_variables
+            template = prompt_template.template.replace("{", "{{").replace("}", "}}")
+            return template, prompt_template.input_variables
         elif isinstance(prompt_template, ChatPromptTemplate):
             return self.convert_chat_prompt_to_text(prompt_template)
         elif isinstance(prompt_template, FewShotPromptTemplate):
-            return prompt_template.format(), prompt_template.input_variables
+            template = prompt_template.template.replace("{", "{{").replace("}", "}}")
+            return template, prompt_template.input_variables
         else:
             raise TypeError(
                 f"Unsupported prompt template type: {type(prompt_template)}"
@@ -81,11 +83,14 @@ class PromptParser:
                 input_variables.add(msg.variable_name)
             else:
                 role = self._get_message_role(msg)
-                content = msg.prompt.template if hasattr(msg, "prompt") else msg.content
+                if hasattr(msg, "prompt"):
+                    content = msg.prompt.template
+                    content = content.replace("{", "{{").replace("}", "}}")
+                    input_variables.update(msg.prompt.input_variables)
+                else:
+                    content = msg.content
                 content = content.replace(self.DELIMITER, "")
                 prompt_lines.append(f"{role}: {content}")
-                if hasattr(msg, "prompt"):
-                    input_variables.update(msg.prompt.input_variables)
         return self.DELIMITER.join(prompt_lines), list(input_variables)
 
     @staticmethod
@@ -144,8 +149,9 @@ class PromptParser:
             line = line.strip()
             if not line:
                 continue
-            if line.startswith("{") and line.endswith("}"):
-                messages.append(MessagesPlaceholder(variable_name=line[1:-1].strip()))
+            if line.startswith("{{") and line.endswith("}}"):
+                variable_name = line[2:-2].strip()
+                messages.append(MessagesPlaceholder(variable_name=variable_name))
                 continue
 
             role, _, content = line.partition(":")
@@ -153,7 +159,7 @@ class PromptParser:
             if not content:
                 continue
 
-            is_template = "{" in content and "}" in content
+            is_template = "{{" in content and "}}" in content
             message_mapping = {
                 "Human": HumanMessagePromptTemplate if is_template else HumanMessage,
                 "AI": AIMessagePromptTemplate if is_template else AIMessage,
@@ -165,7 +171,8 @@ class PromptParser:
             )
 
             if is_template:
-                messages.append(message_class.from_template(content))
+                template_content = content.replace("{{", "{").replace("}}", "}")
+                messages.append(message_class.from_template(template_content))
             else:
                 messages.append(message_class(content=content))
         return messages
