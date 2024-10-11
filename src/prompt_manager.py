@@ -9,9 +9,11 @@ Key features:
 """
 
 from typing import Any, Dict, List, Optional
+
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from langchain.prompts import BasePromptTemplate, ChatPromptTemplate, PromptTemplate
+
 from .logger import Loggable
 from .prompt_parser import PromptParser
 
@@ -22,8 +24,20 @@ class PromptManager(Loggable):
     """
     A class for managing prompts using the Bedrock Agent API.
 
-    This class provides methods to create, retrieve, list, and delete prompts,
-    as well as create new versions of existing prompts.
+    This class provides methods to create, retrieve, list, and delete prompts
+    using the Bedrock Agent API.
+
+    Attributes:
+        _bedrock_client: The Bedrock Agent client.
+        _parser: The PromptParser instance used for parsing prompts.
+        _prompt_id: The ID of the last created or retrieved prompt.
+
+    Methods:
+        create_prompt: Create a new prompt.
+        create_prompt_version: Create a new version of an existing prompt.
+        get_prompt: Retrieve a prompt.
+        list_prompts: List prompts.
+        delete_prompt: Delete a prompt.
     """
 
     def __init__(
@@ -39,8 +53,9 @@ class PromptManager(Loggable):
             parser (Optional[PromptParser]): A PromptParser instance. If None, a new one will be created.
         """
         super().__init__()
-        self.bedrock_client = boto3.Session(**boto_kwargs).client("bedrock-agent")
-        self.parser = parser or PromptParser()
+        self._bedrock_client = boto3.Session(**boto_kwargs).client("bedrock-agent")
+        self._parser = parser or PromptParser()
+        self._prompt_id = None
 
     def create_prompt(
         self,
@@ -58,15 +73,16 @@ class PromptManager(Loggable):
         Create a new prompt.
 
         Args:
-            prompt_template (BasePromptTemplate): The prompt template to use.
+            prompt_template (BasePromptTemplate): The prompt template to create.
             name (str): The name of the prompt.
-            variant_name (str): The name of the variant.
-            description (Optional[str]): A description of the prompt.
-            default_variant (Optional[str]): The default variant.
-            tags (Optional[Dict[str, str]]): Tags to associate with the prompt.
-            model_id (Optional[str]): The ID of the model to use.
-            inference_configuration (Optional[Dict[str, Any]]): Inference configuration.
-            customer_encryption_key_arn (Optional[str]): The ARN of the customer encryption key.
+            variant_name (str, optional): The name of the prompt variant. Defaults to DEFAULT_VARIANT_NAME.
+            description (Optional[str], optional): A description of the prompt. Defaults to None.
+            default_variant (Optional[str], optional): The default variant of the prompt. Defaults to None.
+            tags (Optional[Dict[str, str]], optional): Tags to associate with the prompt. Defaults to None.
+            model_id (Optional[str], optional): The ID of the model to use. Defaults to None.
+            inference_configuration (Optional[Dict[str, Any]], optional): Inference configuration. Defaults to None.
+            customer_encryption_key_arn (Optional[str], optional): The ARN of the customer encryption key.
+                Defaults to None.
 
         Returns:
             Dict[str, Any]: The response from the Bedrock Agent API.
@@ -76,7 +92,7 @@ class PromptManager(Loggable):
             ClientError: If there's an error with the Bedrock Agent API.
         """
         try:
-            prompt_text, input_variables = self.parser.convert_prompt_template_to_text(
+            prompt_text, input_variables = self._parser.convert_prompt_template_to_text(
                 prompt_template
             )
             variant = self._create_variant(
@@ -94,10 +110,11 @@ class PromptManager(Loggable):
                 tags,
                 customer_encryption_key_arn,
             )
-            response = self.bedrock_client.create_prompt(**create_prompt_args)
+            response = self._bedrock_client.create_prompt(**create_prompt_args)
+            self._prompt_id = response.get("id")
             self.logger.info(
                 "Prompt created: id=%s, arn=%s, name=%s",
-                response.get("id"),
+                self._prompt_id,
                 response.get("arn"),
                 response.get("name"),
             )
@@ -108,7 +125,7 @@ class PromptManager(Loggable):
 
     def create_prompt_version(
         self,
-        prompt_id: str,
+        prompt_id: Optional[str] = None,
         description: Optional[str] = None,
         tags: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
@@ -116,9 +133,10 @@ class PromptManager(Loggable):
         Create a new version of an existing prompt.
 
         Args:
-            prompt_id (str): The ID of the prompt to create a new version for.
-            description (Optional[str]): A description of the new version.
-            tags (Optional[Dict[str, str]]): Tags to associate with the new version.
+            prompt_id (Optional[str], optional): The ID of the prompt to version.
+                If None, uses the last created/retrieved prompt ID. Defaults to None.
+            description (Optional[str], optional): A description of the new version. Defaults to None.
+            tags (Optional[Dict[str, str]], optional): Tags to associate with the new version. Defaults to None.
 
         Returns:
             Dict[str, Any]: The response from the Bedrock Agent API.
@@ -129,11 +147,11 @@ class PromptManager(Loggable):
         """
         try:
             create_prompt_version_args = {
-                "promptIdentifier": prompt_id,
+                "promptIdentifier": prompt_id or self._prompt_id,
                 "description": description,
                 "tags": tags,
             }
-            response = self.bedrock_client.create_prompt_version(
+            response = self._bedrock_client.create_prompt_version(
                 **{k: v for k, v in create_prompt_version_args.items() if v is not None}
             )
             self.logger.info(
@@ -149,7 +167,8 @@ class PromptManager(Loggable):
 
     def get_prompt(
         self,
-        prompt_id: str,
+        prompt_id: Optional[str] = None,
+        name: Optional[str] = None,
         prompt_version: Optional[str] = None,
         return_chat_template: bool = True,
     ) -> Optional[BasePromptTemplate]:
@@ -157,47 +176,58 @@ class PromptManager(Loggable):
         Retrieve a prompt.
 
         Args:
-            prompt_id (str): The ID of the prompt to retrieve.
-            prompt_version (Optional[str]): The version of the prompt to retrieve.
-            return_chat_template (bool): Whether to return a ChatPromptTemplate for chat prompts.
+            prompt_id (Optional[str], optional): The ID of the prompt to retrieve. Defaults to None.
+            name (Optional[str], optional): The name of the prompt to retrieve. Defaults to None.
+            prompt_version (Optional[str], optional): The version of the prompt to retrieve. Defaults to None.
+            return_chat_template (bool, optional): Whether to return a ChatPromptTemplate for chat prompts.
+                Defaults to True.
 
         Returns:
             Optional[BasePromptTemplate]: The retrieved prompt template, or None if not found.
 
         Raises:
+            ValueError: If neither prompt_id nor name is provided.
             BotoCoreError: If there's an error with the AWS SDK.
             ClientError: If there's an error with the Bedrock Agent API.
         """
         try:
+            if not any([prompt_id, name, self._prompt_id]):
+                raise ValueError("Either 'prompt_id' or 'name' must be provided")
+
+            if name:
+                prompts = self.list_prompts(name=name)
+                prompt_id = prompts[0].get("id") if prompts else None
+                if not prompt_id:
+                    return None
+
             get_prompt_args = {
-                "promptIdentifier": prompt_id,
+                "promptIdentifier": prompt_id or self._prompt_id,
                 "promptVersion": str(prompt_version) if prompt_version else None,
             }
-            response = self.bedrock_client.get_prompt(
+            response = self._bedrock_client.get_prompt(
                 **{k: v for k, v in get_prompt_args.items() if v is not None}
             )
+
             variants = response.get("variants", [])
             if not variants:
                 return None
 
             variant = variants[0]
-            template_config = variant.get("templateConfiguration", {})
-            text_config = template_config.get("text", {})
+            text_config = variant.get("templateConfiguration", {}).get("text", {})
             prompt_text = text_config.get("text", "")
             input_variables = [
                 var["name"] for var in text_config.get("inputVariables", [])
             ]
 
-            is_chat_prompt = self.parser.is_chat_prompt(prompt_text)
-            if is_chat_prompt and return_chat_template:
-                messages = self.parser.parse_chat_messages(prompt_text)
+            if self._parser.is_chat_prompt(prompt_text) and return_chat_template:
+                messages = self._parser.parse_chat_messages(prompt_text)
                 return ChatPromptTemplate.from_messages(messages)
             else:
                 return PromptTemplate(
                     input_variables=input_variables, template=prompt_text
                 )
-        except (BotoCoreError, ClientError):
-            self.logger.exception("Error getting prompt")
+        except (BotoCoreError, ClientError) as e:
+            self.logger.exception("Error getting prompt: %s", str(e))
             raise
 
     def list_prompts(
@@ -208,16 +238,16 @@ class PromptManager(Loggable):
         name: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
-        List prompts.
+        List prompts with optional filtering and pagination.
 
         Args:
-            max_results (int): The maximum number of results to return.
-            next_token (Optional[str]): The token for the next page of results.
-            prompt_identifier (Optional[str]): The identifier of the prompt to list.
-            name (Optional[str]): The name of the prompt to list.
+            max_results (int, optional): Maximum number of results to return. Defaults to 100.
+            next_token (Optional[str], optional): Token for pagination. Defaults to None.
+            prompt_identifier (Optional[str], optional): Identifier to filter prompts. Defaults to None.
+            name (Optional[str], optional): Name to filter prompts. Defaults to None.
 
         Returns:
-            List[Dict[str, Any]]: A list of prompt summaries.
+            List[Dict[str, Any]]: List of prompt summaries matching the criteria.
 
         Raises:
             BotoCoreError: If there's an error with the AWS SDK.
@@ -229,26 +259,26 @@ class PromptManager(Loggable):
                 "nextToken": next_token,
                 "promptIdentifier": prompt_identifier,
             }
-            response = self.bedrock_client.list_prompts(
+            response = self._bedrock_client.list_prompts(
                 **{k: v for k, v in list_prompts_args.items() if v is not None}
             )
             prompts = response.get("promptSummaries", [])
             return [
                 prompt for prompt in prompts if not name or prompt.get("name") == name
             ]
-        except (BotoCoreError, ClientError):
-            self.logger.exception("Error listing prompts")
+        except (BotoCoreError, ClientError) as e:
+            self.logger.exception("Error listing prompts: %s", str(e))
             raise
 
     def delete_prompt(
-        self, prompt_id: str, prompt_version: Optional[str] = None
+        self, prompt_id: Optional[str] = None, prompt_version: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Delete a prompt.
+        Delete a prompt or a specific version of a prompt.
 
         Args:
-            prompt_id (str): The ID of the prompt to delete.
-            prompt_version (Optional[str]): The version of the prompt to delete.
+            prompt_id (Optional[str], optional): The identifier of the prompt to delete. Defaults to None.
+            prompt_version (Optional[str], optional): The version of the prompt to delete. Defaults to None.
 
         Returns:
             Dict[str, Any]: The response from the Bedrock Agent API.
@@ -259,18 +289,16 @@ class PromptManager(Loggable):
         """
         try:
             delete_prompt_args = {
-                "promptIdentifier": prompt_id,
+                "promptIdentifier": prompt_id or self._prompt_id,
                 "promptVersion": str(prompt_version) if prompt_version else None,
             }
-            response = self.bedrock_client.delete_prompt(
+            response = self._bedrock_client.delete_prompt(
                 **{k: v for k, v in delete_prompt_args.items() if v is not None}
             )
-            self.logger.info(
-                "Prompt deleted: id=%s, version=%s", prompt_id, prompt_version
-            )
+            self.logger.info("Prompt deleted: id=%s, version=%s", prompt_id or self._prompt_id, prompt_version)
             return response
-        except (BotoCoreError, ClientError):
-            self.logger.exception("Error deleting prompt")
+        except (BotoCoreError, ClientError) as e:
+            self.logger.exception("Error deleting prompt: %s", str(e))
             raise
 
     @staticmethod
@@ -282,13 +310,13 @@ class PromptManager(Loggable):
         model_id: Optional[str],
     ) -> Dict[str, Any]:
         """
-        Create a variant configuration.
+        Create a variant configuration for a prompt.
 
         Args:
             variant_name (str): The name of the variant.
-            prompt_text (str): The prompt text.
-            input_variables (List[str]): The input variables for the prompt.
-            inference_configuration (Optional[Dict[str, Any]]): The inference configuration.
+            prompt_text (str): The text of the prompt.
+            input_variables (List[str]): List of input variable names.
+            inference_configuration (Optional[Dict[str, Any]]): Configuration for inference.
             model_id (Optional[str]): The ID of the model to use.
 
         Returns:
@@ -325,10 +353,10 @@ class PromptManager(Loggable):
         Args:
             name (str): The name of the prompt.
             variant (Dict[str, Any]): The variant configuration.
-            default_variant (Optional[str]): The default variant.
+            default_variant (Optional[str]): The name of the default variant.
             description (Optional[str]): A description of the prompt.
             tags (Optional[Dict[str, str]]): Tags to associate with the prompt.
-            customer_encryption_key_arn (Optional[str]): The ARN of the customer encryption key.
+            customer_encryption_key_arn (Optional[str]): ARN of the customer encryption key.
 
         Returns:
             Dict[str, Any]: The arguments for creating a prompt.

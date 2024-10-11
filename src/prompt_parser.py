@@ -30,7 +30,16 @@ class PromptParser:
     A class for parsing and converting various prompt templates.
 
     This class provides methods to convert different types of prompt templates
-    to a standardized text format, and to parse chat messages from text.
+    into a standardized text format and extract input variables.
+
+    Attributes:
+        DELIMITER (str): The delimiter used to separate different parts of a prompt.
+
+    Methods:
+        convert_prompt_template_to_text: Converts a prompt template to text and extracts input variables.
+        convert_chat_prompt_to_text: Converts a chat prompt template to text and extracts input variables.
+        is_chat_prompt: Checks if a given prompt text is a chat prompt.
+        parse_chat_messages: Parses chat messages from the given prompt text.
     """
 
     DELIMITER: str = "\n\n"
@@ -45,17 +54,19 @@ class PromptParser:
             prompt_template (BasePromptTemplate): The prompt template to convert.
 
         Returns:
-            Tuple[str, List[str]]: A tuple containing the converted text and a list of input variables.
+            Tuple[str, List[str]]: A tuple containing the converted template text and a list of input variables.
 
         Raises:
             TypeError: If an unsupported prompt template type is provided.
         """
         if isinstance(prompt_template, PromptTemplate):
-            return prompt_template.template, prompt_template.input_variables
+            template = prompt_template.template.replace("{", "{{").replace("}", "}}")
+            return template, prompt_template.input_variables
         elif isinstance(prompt_template, ChatPromptTemplate):
             return self.convert_chat_prompt_to_text(prompt_template)
         elif isinstance(prompt_template, FewShotPromptTemplate):
-            return prompt_template.format(), prompt_template.input_variables
+            template = prompt_template.template.replace("{", "{{").replace("}", "}}")
+            return template, prompt_template.input_variables
         else:
             raise TypeError(
                 f"Unsupported prompt template type: {type(prompt_template)}"
@@ -71,7 +82,7 @@ class PromptParser:
             chat_prompt (ChatPromptTemplate): The chat prompt template to convert.
 
         Returns:
-            Tuple[str, List[str]]: A tuple containing the converted text and a list of input variables.
+            Tuple[str, List[str]]: A tuple containing the converted template text and a list of input variables.
         """
         prompt_lines = []
         input_variables = set()
@@ -82,10 +93,14 @@ class PromptParser:
             else:
                 role = self._get_message_role(msg)
                 content = msg.prompt.template if hasattr(msg, "prompt") else msg.content
-                content = content.replace(self.DELIMITER, "")
-                prompt_lines.append(f"{role}: {content}")
+                content = (
+                    content.replace("{", "{{")
+                    .replace("}", "}}")
+                    .replace(self.DELIMITER, "")
+                )
                 if hasattr(msg, "prompt"):
                     input_variables.update(msg.prompt.input_variables)
+                prompt_lines.append(f"{role}: {content}")
         return self.DELIMITER.join(prompt_lines), list(input_variables)
 
     @staticmethod
@@ -99,17 +114,21 @@ class PromptParser:
             message (Union[BaseMessage, BaseMessagePromptTemplate]): The message to get the role from.
 
         Returns:
-            str: The role of the message.
+            str: The role of the message (Human, AI, System, or Unknown).
         """
         role_mapping = {
             (HumanMessage, HumanMessagePromptTemplate): "Human",
             (AIMessage, AIMessagePromptTemplate): "AI",
             (SystemMessage, SystemMessagePromptTemplate): "System",
         }
-        for types, role in role_mapping.items():
-            if isinstance(message, types):
-                return role
-        return "Unknown"
+        return next(
+            (
+                role
+                for types, role in role_mapping.items()
+                if isinstance(message, types)
+            ),
+            "Unknown",
+        )
 
     @staticmethod
     def is_chat_prompt(prompt_text: str) -> bool:
@@ -127,8 +146,7 @@ class PromptParser:
         )
 
     def parse_chat_messages(
-        self,
-        prompt_text: str,
+        self, prompt_text: str
     ) -> List[Union[AIMessage, HumanMessage, SystemMessage, MessagesPlaceholder]]:
         """
         Parse chat messages from the given prompt text.
@@ -144,8 +162,8 @@ class PromptParser:
             line = line.strip()
             if not line:
                 continue
-            if line.startswith("{") and line.endswith("}"):
-                messages.append(MessagesPlaceholder(variable_name=line[1:-1].strip()))
+            if line.startswith("{{") and line.endswith("}}"):
+                messages.append(MessagesPlaceholder(variable_name=line[2:-2].strip()))
                 continue
 
             role, _, content = line.partition(":")
@@ -153,19 +171,22 @@ class PromptParser:
             if not content:
                 continue
 
-            is_template = "{" in content and "}" in content
+            is_template = "{{" in content and "}}" in content
             message_mapping = {
                 "Human": HumanMessagePromptTemplate if is_template else HumanMessage,
                 "AI": AIMessagePromptTemplate if is_template else AIMessage,
                 "System": SystemMessagePromptTemplate if is_template else SystemMessage,
             }
             message_class = message_mapping.get(
-                role,
-                SystemMessagePromptTemplate if is_template else SystemMessage,
+                role, SystemMessagePromptTemplate if is_template else SystemMessage
             )
 
             if is_template:
-                messages.append(message_class.from_template(content))
+                messages.append(
+                    message_class.from_template(
+                        content.replace("{{", "{").replace("}}", "}")
+                    )
+                )
             else:
                 messages.append(message_class(content=content))
         return messages
