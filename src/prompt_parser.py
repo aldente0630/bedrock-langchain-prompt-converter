@@ -15,7 +15,6 @@ from langchain.prompts import (
     AIMessagePromptTemplate,
     BasePromptTemplate,
     ChatPromptTemplate,
-    FewShotPromptTemplate,
     HumanMessagePromptTemplate,
     MessagesPlaceholder,
     PromptTemplate,
@@ -64,9 +63,6 @@ class PromptParser:
             return template, prompt_template.input_variables
         elif isinstance(prompt_template, ChatPromptTemplate):
             return self.convert_chat_prompt_to_text(prompt_template)
-        elif isinstance(prompt_template, FewShotPromptTemplate):
-            template = prompt_template.template.replace("{", "{{").replace("}", "}}")
-            return template, prompt_template.input_variables
         else:
             raise TypeError(
                 f"Unsupported prompt template type: {type(prompt_template)}"

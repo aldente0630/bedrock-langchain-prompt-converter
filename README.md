@@ -1,7 +1,9 @@
 # Bedrock LangChain Prompt Converter
 
 ![picture](./assets/picture.png)  
-Bedrock LangChain Prompt Converter is a helper library that seamlessly integrates LangChain prompt templates with Amazon Bedrock's Prompt Management API, enabling efficient cross-platform prompt handling.
+Bedrock LangChain Prompt Converter is a helper library that seamlessly integrates LangChain prompt templates with Amazon Bedrock's Prompt Management API, enabling efficient cross-platform prompt handling.  
+  
+NOTE: Currently *FewShotPromptTemplate* and *FewShotChatMessagePromptTemplate* are not supported.
 
 ## Usage
 
