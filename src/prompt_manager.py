@@ -20,7 +20,7 @@ from .prompt_parser import PromptParser
 DEFAULT_VARIANT_NAME: str = "variant-001"
 
 
-class PromptManager(Loggable):
+class PromptManager:
     """
     A class for managing prompts using the Bedrock Agent API.
 
@@ -52,7 +52,6 @@ class PromptManager(Loggable):
             boto_kwargs (Dict[str, Any]): Keyword arguments for boto3 session.
             parser (Optional[PromptParser]): A PromptParser instance. If None, a new one will be created.
         """
-        super().__init__()
         self._bedrock_client = boto3.Session(**boto_kwargs).client("bedrock-agent")
         self._parser = parser or PromptParser()
         self._prompt_id = None
@@ -112,7 +111,7 @@ class PromptManager(Loggable):
             )
             response = self._bedrock_client.create_prompt(**create_prompt_args)
             self._prompt_id = response.get("id")
-            self.logger.info(
+            logger.info(
                 "Prompt created: id=%s, arn=%s, name=%s",
                 self._prompt_id,
                 response.get("arn"),
@@ -120,7 +119,7 @@ class PromptManager(Loggable):
             )
             return response
         except (BotoCoreError, ClientError):
-            self.logger.exception("Error creating prompt")
+            logger.exception("Error creating prompt")
             raise
 
     def create_prompt_version(
@@ -154,7 +153,7 @@ class PromptManager(Loggable):
             response = self._bedrock_client.create_prompt_version(
                 **{k: v for k, v in create_prompt_version_args.items() if v is not None}
             )
-            self.logger.info(
+            logger.info(
                 "Prompt version created: id=%s, arn=%s, name=%s",
                 response.get("id"),
                 response.get("arn"),
@@ -162,7 +161,7 @@ class PromptManager(Loggable):
             )
             return response
         except (BotoCoreError, ClientError):
-            self.logger.exception("Error creating prompt version")
+            logger.exception("Error creating prompt version")
             raise
 
     def get_prompt(
@@ -227,7 +226,7 @@ class PromptManager(Loggable):
                     input_variables=input_variables, template=prompt_text
                 )
         except (BotoCoreError, ClientError) as e:
-            self.logger.exception("Error getting prompt: %s", str(e))
+            logger.exception("Error getting prompt: %s", str(e))
             raise
 
     def list_prompts(
@@ -267,7 +266,7 @@ class PromptManager(Loggable):
                 prompt for prompt in prompts if not name or prompt.get("name") == name
             ]
         except (BotoCoreError, ClientError) as e:
-            self.logger.exception("Error listing prompts: %s", str(e))
+            logger.exception("Error listing prompts: %s", str(e))
             raise
 
     def delete_prompt(
@@ -295,10 +294,14 @@ class PromptManager(Loggable):
             response = self._bedrock_client.delete_prompt(
                 **{k: v for k, v in delete_prompt_args.items() if v is not None}
             )
-            self.logger.info("Prompt deleted: id=%s, version=%s", prompt_id or self._prompt_id, prompt_version)
+            logger.info(
+                "Prompt deleted: id=%s, version=%s",
+                prompt_id or self._prompt_id,
+                prompt_version,
+            )
             return response
         except (BotoCoreError, ClientError) as e:
-            self.logger.exception("Error deleting prompt: %s", str(e))
+            logger.exception("Error deleting prompt: %s", str(e))
             raise
 
     @staticmethod
